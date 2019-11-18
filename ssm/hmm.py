@@ -83,8 +83,8 @@ class HMM(object):
             t=obs.MultivariateStudentsTObservations,
             diagonal_t=obs.StudentsTObservations,
             diagonal_studentst=obs.StudentsTObservations,
-            exponential=obs.ExponentialObservations,
             bernoulli=obs.BernoulliObservations,
+            logistic=obs.LogisticObservations,
             categorical=obs.CategoricalObservations,
             poisson=obs.PoissonObservations,
             vonmises=obs.VonMisesObservations,
@@ -197,7 +197,9 @@ class HMM(object):
             assert input.shape == (T,) + M
 
         # Get the type of the observations
-        dummy_data = self.observations.sample_x(0, np.empty(0,) + D)
+        dummy_data = self.observations.sample_x(
+            0, np.empty(0,) + D, input=input[0]
+            )
         dtype = dummy_data.dtype
 
         # Initialize the data array
@@ -212,7 +214,9 @@ class HMM(object):
             # Sample the first state from the initial distribution
             pi0 = np.exp(self.init_state_distn.log_initial_state_distn(data, input, mask, tag))
             z[0] = npr.choice(self.K, p=pi0)
-            data[0] = self.observations.sample_x(z[0], data[:0], input=input[0], with_noise=with_noise)
+            data[0] = self.observations.sample_x(
+                z[0], data[:0], input=input[0], with_noise=with_noise
+                )
 
             # We only need to sample T-1 datapoints now
             T = T - 1
@@ -234,7 +238,9 @@ class HMM(object):
         for t in range(pad, pad+T):
             Pt = np.exp(self.transitions.log_transition_matrices(data[t-1:t+1], input[t-1:t+1], mask=mask[t-1:t+1], tag=tag))[0]
             z[t] = npr.choice(self.K, p=Pt[z[t-1]])
-            data[t] = self.observations.sample_x(z[t], data[:t], input=input[t], tag=tag, with_noise=with_noise)
+            data[t] = self.observations.sample_x(
+                z[t], data[:t], input=input[t], tag=tag, with_noise=with_noise
+                )
 
         # Return the whole data if no prefix is given.
         # Otherwise, just return the simulated part.
@@ -301,7 +307,9 @@ class HMM(object):
 
     @ensure_args_are_lists
     def log_probability(self, datas, inputs=None, masks=None, tags=None):
-        return self.log_likelihood(datas, inputs, masks, tags) + self.log_prior()
+        log_likelihood = self.log_likelihood(datas, inputs, masks, tags) 
+        log_prior = self.log_prior()
+        return log_likelihood + log_prior 
 
     def expected_log_likelihood(
             self, expectations, datas, inputs=None, masks=None, tags=None):

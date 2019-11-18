@@ -1,6 +1,8 @@
 import copy
 import warnings
 
+import numpy.linalg as la
+
 import autograd.numpy as np
 import autograd.numpy.random as npr
 
@@ -15,11 +17,10 @@ from ssm.cstats import robust_ar_statistics
 from ssm.optimizers import adam, bfgs, rmsprop, sgd, lbfgs
 import ssm.stats as stats
 
+from sklearn.linear_model import LogisticRegression
+
 class Observations(object):
-    # K = number of discrete states
-    # D = number of observed dimensions
-    # M = exogenous input dimensions (the inputs modulate the probability of discrete state transitions via a multiclass logistic regression)
-    
+
     def __init__(self, K, D, M=0):
         self.K, self.D, self.M = K, D, M
 
@@ -158,51 +159,6 @@ class GaussianObservations(Observations):
         """
         return expectations.dot(self.mus)
 
-class ExponentialObservations(Observations):
-    def __init__(self, K, D, M=0):
-        super(ExponentialObservations, self).__init__(K, D, M)
-        self.log_lambdas = npr.randn(K, D)
-
-    @property
-    def params(self):
-        return self.log_lambdas
-
-    @params.setter
-    def params(self, value):
-        self.log_lambdas = value
-
-    def permute(self, perm):
-        self.log_lambdas = self.log_lambdas[perm]
-
-    @ensure_args_are_lists
-    def initialize(self, datas, inputs=None, masks=None, tags=None):
-        # Initialize with KMeans
-        from sklearn.cluster import KMeans
-        data = np.concatenate(datas)
-        km = KMeans(self.K).fit(data)
-        self.log_lambdas = -np.log(km.cluster_centers_ + 1e-3)
-
-    def log_likelihoods(self, data, input, mask, tag):
-        lambdas = np.exp(self.log_lambdas)
-        mask = np.ones_like(data, dtype=bool) if mask is None else mask
-        return stats.exponential_logpdf(data[:, None, :], lambdas, mask=mask[:, None, :])
-
-    def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
-        lambdas = np.exp(self.log_lambdas)
-        return npr.exponential(1/lambdas[z])
-
-    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
-        x = np.concatenate(datas)
-        weights = np.concatenate([Ez for Ez, _, _ in expectations])
-        for k in range(self.K):
-            self.log_lambdas[k] = -np.log(np.average(x, axis=0, weights=weights[:,k]) + 1e-16)
-                
-    def smooth(self, expectations, data, input, tag):
-        """
-        Compute the mean observation under the posterior distribution
-        of latent discrete states.
-        """
-        return expectations.dot(1/np.exp(self.log_lambdas))
 
 class DiagonalGaussianObservations(Observations):
     def __init__(self, K, D, M=0):
@@ -581,6 +537,101 @@ class BernoulliObservations(Observations):
         Compute the mean observation under the posterior distribution
         of latent discrete states.
         """
+        ps = 1 / (1 + np.exp(self.logit_ps))
+        return expectations.dot(ps)
+
+class LogisticObservations(Observations):
+    """
+    An extension of the existing BernoulliObservations class. Here, we define
+    coef, the coefficients of the features (AKA inputs) for our decision
+    function (a logistic regression model). The coef matrix also includes an
+    extra column for the bias term. Thus, when inputs are passed in, a constant
+    value of 1 is appended to each input to allow for a bias. Thus,
+    (coef[:-1]*inputs + coef[-1]) is equivalent to logit_ps in the
+    BernoulliObservations class.
+    """
+
+    def __init__(self, K, D, input_size, set_coef=None, M=0):
+        super(LogisticObservations, self).__init__(K, D, M)
+        if D != 1:
+            raise ValueError(
+                "LogisticObservations only observes 1-D observations."
+                )
+        if set_coef is None:
+            self.coef = npr.randn(K, input_size + 1)
+        else:
+            self.coef = set_coef
+            if self.coef.shape != (K, input_size + 1):
+                raise ValueError(
+                    "User-defined coefficients are not the correct dimensions."
+                    )
+
+    @property
+    def params(self):
+        return self.coef
+
+    @params.setter
+    def params(self, value):
+        self.coef = value
+
+    def permute(self, perm):
+        self.coef = self.coef[perm]
+
+    @ensure_args_are_lists
+    def initialize(self, datas, inputs, masks=None, tags=None):
+
+        # Initialize with KMeans
+        from sklearn.cluster import KMeans
+        data = np.concatenate(datas)
+        km = KMeans(self.K).fit(data)
+        ps = np.clip(km.cluster_centers_, 1e-3, 1-1e-3)
+        logit_ps = logit(ps) #TODO: Implement for the logistic case
+
+    def log_prior(self):
+        if isinstance(self.coef, np.ndarray):
+            flattened_coef = self.coef.flatten()
+        else:
+            flattened_coef = self.coef._value.flatten()
+        log_prior = -0.5*(la.norm(flattened_coef)**2)
+        return log_prior
+
+    def log_likelihoods(self, data, input, mask, tag):
+        mask = np.ones_like(data, dtype=bool) if mask is None else mask
+        input_with_constant = np.hstack(
+            (input, np.ones((input.shape[0], 1)))
+            )
+        logit_ps = input_with_constant @ self.coef.T
+        log_likes = stats.logistic_logpdf(data, logit_ps, mask=mask)
+        return log_likes
+
+    def sample_x(self, z, xhist, input, tag=None, with_noise=True):
+        if len(input.shape) == 1:
+            input = np.reshape(input, (1,-1))
+        input_with_constant = np.hstack(
+            (input, np.ones((input.shape[0], 1)))
+            )
+        logit_ps = input_with_constant @ self.coef.T
+        ps = 1 / (1 + np.exp(-1*logit_ps))
+        return npr.rand(self.D) < ps[0,z]
+
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
+        x = np.concatenate(datas)
+        weights = np.concatenate([Ez for Ez, _, _ in expectations])
+        for k in range(self.K):
+            clf = LogisticRegression().fit(
+                inputs[0], x, sample_weight=weights[:,k]
+                )
+            coefs = clf.coef_.flatten()
+            intercept = clf.intercept_
+            self.coef[k,:-1] = coefs
+            self.coef[k,-1] = intercept
+
+    def smooth(self, expectations, data, input, tag):
+        """
+        Compute the mean observation under the posterior distribution
+        of latent discrete states.
+        """
+        #TODO: Implement for the logistic case
         ps = 1 / (1 + np.exp(self.logit_ps))
         return expectations.dot(ps)
 

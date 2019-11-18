@@ -521,6 +521,62 @@ def bernoulli_logpdf(data, logit_ps, mask=None):
     lls = data * logit_ps - m - np.log(np.exp(-m) + np.exp(logit_ps - m))
     return np.sum(lls * mask, axis=-1)
 
+def logistic_logpdf(data, logit_ps, mask=None):
+    """
+    Compute the log probability density of a Bernoulli distribution.
+    This will broadcast as long as data and logit_ps have the same
+    (or at least compatible) leading dimensions. This is specific to the
+    LogisticObservations clss where logit_ps varies over trials due to different
+    inputs.
+
+    Parameters
+    ----------
+    data : array_like (..., D)
+        The points at which to evaluate the log density
+
+    logit_ps : array_like (..., D)
+        The logit(s) log p / (1 - p) of the Bernoulli distribution(s)
+
+    mask : array_like (..., D) bool
+        Optional mask indicating which entries in the data are observed
+
+    Returns
+    -------
+    lps : array_like (...,)
+        Log probabilities under the Bernoulli distribution(s).
+    """
+    D = data.shape[-1]
+    K = logit_ps.shape[1]
+    assert (data.dtype == int or data.dtype == bool)
+    assert data.min() >= 0 and data.max() <= 1
+
+    # Check mask
+    mask = mask if mask is not None else np.ones_like(data, dtype=bool)
+    assert mask.shape == data.shape
+
+    # Evaluate log probability
+    # log Pr(x | p) = x * log(p) + (1-x) * log(1-p)
+    #               = x * log(p / (1-p)) + log(1-p)
+    #               = x * log(p / (1-p)) - log(1/(1-p))
+    #               = x * log(p / (1-p)) - log(1 + p/(1-p)).
+    #
+    # Let u = log (p / (1-p)) = logit(p), then
+    #
+    # log Pr(x | p) = x * u - log(1 + e^u)
+    #               = x * u - log(e^0 + e^u)
+    #               = x * u - log(e^m * (e^-m + e^(u-m))
+    #               = x * u - m - log(exp(-m) + exp(u-m)).
+    #
+    # This holds for any m. we choose m = max(0, u) to avoid overflow.
+    m = np.maximum(0, logit_ps) #Normally data*logit is trials x classes x 1
+    aug_data = data
+    aug_mask = mask
+    for _ in range(K-1):
+        aug_data = np.hstack((aug_data, data))
+        aug_mask = np.hstack((aug_mask, mask))
+    lls = aug_data * logit_ps - m - np.log(np.exp(-m) + np.exp(logit_ps - m))
+    observed_lls = lls * aug_mask
+    return observed_lls 
 
 def poisson_logpdf(data, lambdas, mask=None):
     """
@@ -637,37 +693,3 @@ def vonmises_logpdf(data, mus, kappas, mask=None):
 
     ll = kappas * np.cos(data - mus) - np.log(2 * np.pi) - np.log(i0(kappas))
     return np.sum(ll * mask, axis=-1)
-
-
-def exponential_logpdf(data, lambdas, mask=None):
-    """
-    Compute the log probability density of an exponential distribution.
-    This will broadcast as long as data and lambdas have the same
-    (or at least compatible) leading dimensions.
-
-    Parameters
-    ----------
-    data : array_like (..., D)
-        The points at which to evaluate the log density
-
-    lambdas : array_like (..., D)
-        The rates of the Poisson distribution(s)
-
-    mask : array_like (..., D) bool
-        Optional mask indicating which entries in the data are observed
-
-    Returns
-    -------
-    lps : array_like (...,)
-        Log probabilities under the Poisson distribution(s).
-    """
-    D = data.shape[-1]
-    assert lambdas.shape[-1] == D
-
-    # Check mask
-    mask = mask if mask is not None else np.ones_like(data, dtype=bool)
-    assert mask.shape == data.shape
-
-    # Compute log pdf
-    lls = np.log(lambdas) - lambdas * data
-    return np.sum(lls * mask, axis=-1)
