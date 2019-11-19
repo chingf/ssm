@@ -631,9 +631,14 @@ class LogisticObservations(Observations):
         Compute the mean observation under the posterior distribution
         of latent discrete states.
         """
-        #TODO: Implement for the logistic case
-        ps = 1 / (1 + np.exp(self.logit_ps))
-        return expectations.dot(ps)
+        if len(input.shape) == 1:
+            input = np.reshape(input, (1,-1))
+        input_with_constant = np.hstack(
+            (input, np.ones((input.shape[0], 1)))
+            )
+        logit_ps = input_with_constant @ self.coef.T
+        ps = 1 / (1 + np.exp(-1*logit_ps))
+        return expectations*ps
 
 
 class PoissonObservations(Observations):
