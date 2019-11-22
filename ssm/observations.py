@@ -551,7 +551,11 @@ class LogisticObservations(Observations):
     BernoulliObservations class.
     """
 
-    def __init__(self, K, D, input_size, set_coef=None, M=0):
+    def __init__(
+        self, K, D, input_size,
+        set_coef=None, prior_weight=0.5, M=0
+        ):
+
         super(LogisticObservations, self).__init__(K, D, M)
         if D != 1:
             raise ValueError(
@@ -565,6 +569,7 @@ class LogisticObservations(Observations):
                 raise ValueError(
                     "User-defined coefficients are not the correct dimensions."
                     )
+        self.prior_weight = prior_weight
 
     @property
     def params(self):
@@ -592,7 +597,7 @@ class LogisticObservations(Observations):
             flattened_coef = self.coef.flatten()
         else:
             flattened_coef = self.coef._value.flatten()
-        log_prior = -0.5*(la.norm(flattened_coef)**2)
+        log_prior = -self.prior_weight*(la.norm(flattened_coef)**2)
         return log_prior
 
     def log_likelihoods(self, data, input, mask, tag):
@@ -621,6 +626,9 @@ class LogisticObservations(Observations):
             clf = LogisticRegression().fit(
                 inputs[0], x, sample_weight=weights[:,k]
                 )
+            #clf = LogisticRegression().fit(
+            #        inputs[0][weights[:,k] > 0.5], x[weights[:,k] > 0.5]
+            #    )
             coefs = clf.coef_.flatten()
             intercept = clf.intercept_
             self.coef[k,:-1] = coefs
@@ -631,6 +639,7 @@ class LogisticObservations(Observations):
         Compute the mean observation under the posterior distribution
         of latent discrete states.
         """
+
         if len(input.shape) == 1:
             input = np.reshape(input, (1,-1))
         input_with_constant = np.hstack(
