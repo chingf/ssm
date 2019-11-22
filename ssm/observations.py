@@ -623,12 +623,9 @@ class LogisticObservations(Observations):
         x = np.concatenate(datas)
         weights = np.concatenate([Ez for Ez, _, _ in expectations])
         for k in range(self.K):
-            clf = LogisticRegression().fit(
+            clf = LogisticRegression(C=1./self.prior_weight).fit(
                 inputs[0], x, sample_weight=weights[:,k]
                 )
-            #clf = LogisticRegression().fit(
-            #        inputs[0][weights[:,k] > 0.5], x[weights[:,k] > 0.5]
-            #    )
             coefs = clf.coef_.flatten()
             intercept = clf.intercept_
             self.coef[k,:-1] = coefs
