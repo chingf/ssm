@@ -585,12 +585,18 @@ class LogisticObservations(Observations):
     @ensure_args_are_lists
     def initialize(self, datas, inputs, masks=None, tags=None):
 
-        # Initialize with KMeans
-        from sklearn.cluster import KMeans
         data = np.concatenate(datas)
-        km = KMeans(self.K).fit(data)
-        ps = np.clip(km.cluster_centers_, 1e-3, 1-1e-3)
-        logit_ps = logit(ps) #TODO: Implement for the logistic case
+        indices = np.arange(data.size)
+        npr.shuffle(indices)
+        indices_K = np.array_split(indices, self.K)
+        for k in range(self.K):
+            indices_k = indices_K[k]
+            clf = LogisticRegression(C=1./self.prior_weight).fit(
+                inputs[0][indices_k], data[indices_k]
+                )
+            random_noise = npr.randn(self.coef[k].size)
+            self.coef[k][:-1] = clf.coef_.flatten() + random_noise[:-1]
+            self.coef[k][-1] = clf.intercept_ + random_noise[-1]
 
     def log_prior(self):
         if isinstance(self.coef, np.ndarray):
