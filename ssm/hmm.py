@@ -85,6 +85,7 @@ class HMM(object):
             diagonal_studentst=obs.StudentsTObservations,
             bernoulli=obs.BernoulliObservations,
             logistic=obs.LogisticObservations,
+            fixedlogistic=obs.FixedLogisticObservations,
             categorical=obs.CategoricalObservations,
             poisson=obs.PoissonObservations,
             vonmises=obs.VonMisesObservations,
