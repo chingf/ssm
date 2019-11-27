@@ -553,7 +553,7 @@ class LogisticObservations(Observations):
 
     def __init__(
         self, K, D, input_size,
-        set_coef=None, prior_weight=0.5, M=0
+        set_coef=None, prior_weight=0.5, M=0, init_weight=1.
         ):
 
         super(LogisticObservations, self).__init__(K, D, M)
@@ -570,6 +570,7 @@ class LogisticObservations(Observations):
                     "User-defined coefficients are not the correct dimensions."
                     )
         self.prior_weight = prior_weight
+        self.init_weight = init_weight
 
     @property
     def params(self):
@@ -594,7 +595,7 @@ class LogisticObservations(Observations):
             clf = LogisticRegression(C=1./self.prior_weight).fit(
                 inputs[0][indices_k], data[indices_k]
                 )
-            random_noise = npr.randn(self.coef[k].size)
+            random_noise = npr.randn(self.coef[k].size)*self.init_weight
             self.coef[k][:-1] = clf.coef_.flatten() + random_noise[:-1]
             self.coef[k][-1] = clf.intercept_ + random_noise[-1]
 
@@ -652,6 +653,38 @@ class LogisticObservations(Observations):
         ps = 1 / (1 + np.exp(-1*logit_ps))
         return expectations*ps
 
+class FixedLogisticObservations(LogisticObservations):
+    """
+    An extension of the existing LogisticObservations class. This class is
+    mainly for debugging purposes. It is equivalent to LogisticObservations,
+    except the coefficients of each state are always fixed. In practice, this
+    means you likely have a synthetic dataset with ground truth coefficients for
+    each state that is fed into this class.
+    """
+
+    def __init__(
+        self, K, D, input_size,
+        set_coef, prior_weight=0.5, M=0
+        ):
+
+        super(LogisticObservations, self).__init__(K, D, M)
+        if D != 1:
+            raise ValueError(
+                "LogisticObservations only observes 1-D observations."
+                )
+        self.coef = set_coef
+        if self.coef.shape != (K, input_size + 1):
+            raise ValueError(
+                "User-defined coefficients are not the correct dimensions."
+                )
+        self.prior_weight = prior_weight
+
+    @ensure_args_are_lists
+    def initialize(self, datas, inputs, masks=None, tags=None):
+        pass
+
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
+        pass
 
 class PoissonObservations(Observations):
 
