@@ -123,14 +123,14 @@ class StationaryTransitions(Transitions):
         T, D = data.shape
         return np.zeros((T-1, D, D))
 
-class InitializedTransitions(Transitions):
+class InitializedTransitions(StationaryTransitions):
     """
     Standard Hidden Markov Model with fixed initial distribution and
     transition matrix. The initial distribution is user defined around some
     mean on the diagonal.
     """
     def __init__(self, K, D, diagonal_mean=0.95, M=0):
-        super(StationaryTransitions, self).__init__(K, D, M=M)
+        super(InitializedTransitions, self).__init__(K, D, M=M)
         offdiagonal_mean = 1. - diagonal_mean
         Ps = diagonal_mean * np.eye(K) + offdiagonal_mean * npr.rand(K, K)
         Ps /= Ps.sum(axis=1, keepdims=True)
@@ -142,6 +142,7 @@ class FixedTransitions(StationaryTransitions):
     transition matrix. Transition matrix is not updated and is fixed.
     """
     def __init__(self, K, D, log_Ps, M=0):
+        super(FixedTransitions, self).__init__(K, D, M=M)
         self.log_Ps = log_Ps
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
